@@ -14,8 +14,8 @@ This project implements an AI-driven Pac-Man game using Deep Q-Learning (DQN) wi
 - **Web Visualization**: Built with Flask and HTML5 Canvas for real-time game rendering.
 
 ## Demo
-![Pac-Man AI Gameplay](https://via.placeholder.com/400x400.png?text=Pac-Man+AI+Gameplay)  
-*(Replace this with an actual GIF or screenshot of your game by uploading it to the repo and updating the URL.)*
+![Pac-Man AI Gameplay](Screenshot_7.png)  
+![Pac-Man AI Gameplay](Screenshot_8.png)  
 
 ## Prerequisites
 - **Python**: 3.7 or higher
