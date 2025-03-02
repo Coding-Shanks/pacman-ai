@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Pac-Man</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        #container {
+            display: flex;
+            align-items: center;
+        }
+        #gameContainer {
+            position: relative;
+            background: #000;
+            border: 4px solid #ffd700;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+            margin-right: 20px; /* Space between game and neural network */
+        }
+        canvas {
+            background: #000;
+        }
+        #game-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #fff;
+            font-size: 16px;
+        }
+        #dl-metrics {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            color: #ffd700;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px;
+            border-radius: 5px;
+        }
+        button {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 5px 10px;
+            background: #ffd700;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #ffeb3b;
+        }
+        #nn-visualization {
+            width: 300px;
+            color: #fff;
+            font-size: 14px;
+        }
+        .nn-layer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 20px 0;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+        }
+        .nn-label {
+            margin-right: 10px;
+        }
+        .nn-neurons {
+            display: flex;
+            gap: 5px;
+        }
+        .nn-circle {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            transition: background-color 0.3s;
+        }
+        .nn-connection {
+            position: absolute;
+            height: 2px;
+            background: #fff;
+            opacity: 0.3;
+            transition: background-color 0.3s;
+        }
+        #input-layer .nn-circle, #hidden1-layer .nn-circle, #hidden2-layer .nn-circle, #output-layer .nn-circle {
+            background: #00f; /* Blue for all circles initially */
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="gameContainer">
+            <canvas id="gameCanvas" width="400" height="400"></canvas>
+            <div id="game-info">Score: <span id="score">0</span></div>
+            <div id="dl-metrics">
+                Episode: <span id="episode">0</span><br>
+                Epsilon: <span id="epsilon">1.0</span><br>
+                Loss: <span id="loss">0.00</span><br>
+                Food Success: <span id="success_rate">0.00%</span><br>
+                Ghost Avoidance: <span id="avoidance_rate">0.00%</span><br>
+                High Score: <span id="high_score">0</span>
+            </div>
+            <button onclick="resetGame()">Reset</button>
+        </div>
+        <div id="nn-visualization">
+            Neural Network:
+            <div class="nn-layer" style="position: relative;">
+                <span class="nn-label">Input (16)</span>
+                <div class="nn-neurons" id="input-layer"></div>
+            </div>
+            <div style="position: relative; height: 50px;">
+                <div id="input-connections"></div>
+            </div>
+            <div class="nn-layer" style="position: relative;">
+                <span class="nn-label">Hidden (256)</span>
+                <div class="nn-neurons" id="hidden1-layer"></div>
+            </div>
+            <div style="position: relative; height: 50px;">
+                <div id="hidden1-connections"></div>
+            </div>
+            <div class="nn-layer" style="position: relative;">
+                <span class="nn-label">Hidden (128)</span>
+                <div class="nn-neurons" id="hidden2-layer"></div>
+            </div>
+            <div style="position: relative; height: 50px;">
+                <div id="hidden2-connections"></div>
+            </div>
+            <div class="nn-layer" style="position: relative;">
+                <span class="nn-label">Output (4)</span>
+                <div class="nn-neurons" id="output-layer"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gridSize = 20;
+        const tileCount = canvas.width / gridSize;
+
+        let animationFrame = null;
+
+        function drawNNLayer(elementId, neuronCount, connectionId, isLast = false) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = '';
+            const maxNeurons = 5;
+            for (let i = 0; i < Math.min(neuronCount, maxNeurons); i++) {
+                const circle = document.createElement('div');
+                circle.className = 'nn-circle';
+                circle.style.background = '#00f'; // Blue by default
+                element.appendChild(circle);
+            }
+            if (neuronCount > maxNeurons) {
+                element.innerHTML += '<span style="color: #fff;">...</span>';
+            }
+
+            // Draw connections
+            if (connectionId && !isLast) {
+                const connections = document.getElementById(connectionId);
+                connections.innerHTML = '';
+                const fromNeurons = document.getElementById(elementId).querySelectorAll('.nn-circle');
+                const toNeurons = document.getElementById(elementId.replace('layer', 'connections').replace('connections', 'layer').replace('input', 'hidden1').replace('hidden1', 'hidden2').replace('hidden2', 'output'))?.querySelectorAll('.nn-circle') || [];
+                const connectionHeight = 50;
+                const yOffset = connectionHeight / 2;
+
+                fromNeurons.forEach((from, i) => {
+                    toNeurons.forEach((to, j) => {
+                        const line = document.createElement('div');
+                        line.className = 'nn-connection';
+                        const fromRect = from.getBoundingClientRect();
+                        const toRect = to.getBoundingClientRect();
+                        const x1 = fromRect.left + fromRect.width / 2 - connections.getBoundingClientRect().left;
+                        const y1 = connectionHeight;
+                        const x2 = toRect.left + toRect.width / 2 - connections.getBoundingClientRect().left;
+                        const y2 = 0;
+                        line.style.width = `${Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)}px`;
+                        line.style.left = `${x1}px`;
+                        line.style.top = `${yOffset}px`;
+                        line.style.transform = `rotate(${Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI}deg)`;
+                        line.style.background = '#fff';
+                        connections.appendChild(line);
+                    });
+                });
+            }
+        }
+
+        function animateNN(state) {
+            if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
+            }
+
+            const layers = ['input-layer', 'hidden1-layer', 'hidden2-layer', 'output-layer'];
+            let currentLayer = 0;
+            let progress = 0;
+
+            function animate() {
+                if (progress >= 1) {
+                    currentLayer++;
+                    if (currentLayer < layers.length) {
+                        progress = 0;
+                    } else {
+                        // Apply color based on last action result
+                        const outputCircles = document.querySelectorAll('#output-layer .nn-circle');
+                        if (state.action_result === 'failure') {
+                            outputCircles.forEach(circle => circle.style.background = '#ff0000'); // Red for failure
+                        } else if (state.action_result === 'success') {
+                            outputCircles.forEach(circle => circle.style.background = '#00ff00'); // Green for eating food
+                        } else {
+                            outputCircles.forEach(circle => circle.style.background = '#00f'); // Blue for neutral
+                        }
+                        return;
+                    }
+                }
+
+                layers.slice(0, currentLayer + 1).forEach((layer, index) => {
+                    const circles = document.querySelectorAll(`#${layer} .nn-circle`);
+                    const connections = document.getElementById(`${layer.replace('layer', 'connections')}`);
+                    const opacity = index <= currentLayer ? 1 - (progress * 0.5) : 0.3;
+                    circles.forEach(circle => {
+                        circle.style.opacity = opacity;
+                    });
+                    if (connections) {
+                        connections.querySelectorAll('.nn-connection').forEach(line => {
+                            line.style.opacity = opacity;
+                        });
+                    }
+                });
+
+                progress += 0.1; // Maintain fast animation
+                animationFrame = requestAnimationFrame(animate);
+            }
+
+            animate();
+        }
+
+        function initNNVisualization() {
+            drawNNLayer('input-layer', 16, 'input-connections');
+            drawNNLayer('hidden1-layer', 256, 'hidden1-connections');
+            drawNNLayer('hidden2-layer', 128, 'hidden2-connections');
+            drawNNLayer('output-layer', 4, null, true);
+        }
+
+        function drawGame(state) {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = '#333';
+            for (let i = 0; i <= tileCount; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * gridSize, 0);
+                ctx.lineTo(i * gridSize, canvas.height);
+                ctx.moveTo(0, i * gridSize);
+                ctx.lineTo(canvas.width, i * gridSize);
+                ctx.stroke();
+            }
+
+            // Draw walls
+            ctx.fillStyle = '#555';
+            state.walls.forEach(wall => {
+                ctx.fillRect(wall[0] * gridSize, wall[1] * gridSize, gridSize - 2, gridSize - 2);
+            });
+
+            // Draw food (white or red apple)
+            ctx.fillStyle = state.food[2] ? '#ff0000' : '#fff'; // Red for apple, white for regular food
+            ctx.beginPath();
+            ctx.arc(state.food[0] * gridSize + gridSize/2, 
+                    state.food[1] * gridSize + gridSize/2, 
+                    gridSize/4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw ghosts
+            state.ghosts.forEach(ghost => {
+                ctx.fillStyle = '#ff4444';
+                ctx.beginPath();
+                ctx.arc(ghost[0] * gridSize + gridSize/2, 
+                        ghost[1] * gridSize + gridSize/2, 
+                        gridSize/2 - 2, 0, Math.PI);
+                ctx.lineTo(ghost[0] * gridSize + gridSize - 2, ghost[1] * gridSize + gridSize - 2);
+                ctx.lineTo(ghost[0] * gridSize + 2, ghost[1] * gridSize + gridSize - 2);
+                ctx.fill();
+            });
+
+            // Draw Pac-Man
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.arc(state.pacman[0] * gridSize + gridSize/2, 
+                    state.pacman[1] * gridSize + gridSize/2, 
+                    gridSize/2 - 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Update info
+            document.getElementById('score').textContent = state.score;
+            document.getElementById('episode').textContent = state.episode;
+            document.getElementById('epsilon').textContent = state.epsilon;
+            document.getElementById('loss').textContent = state.loss;
+            document.getElementById('success_rate').textContent = `${state.success_rate}%`;
+            document.getElementById('avoidance_rate').textContent = `${state.avoidance_rate}%`;
+            document.getElementById('high_score').textContent = state.high_score;
+
+            if (state.game_over) {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#fff';
+                ctx.font = '24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Game Over', canvas.width/2, canvas.height/2);
+            }
+
+            // Animate neural network
+            animateNN(state);
+        }
+
+        function updateGame() {
+            fetch('/step', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    drawGame(data);
+                    if (!data.game_over) {
+                        setTimeout(updateGame, 200); // Slower updates to reduce server load (200ms)
+                    }
+                });
+        }
+
+        function resetGame() {
+            fetch('/reset', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    drawGame(data);
+                    updateGame();
+                });
+        }
+
+        // Initialize and start
+        initNNVisualization();
+        resetGame();
+    </script>
+</body>
+</html>
